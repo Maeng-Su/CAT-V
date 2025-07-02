@@ -1,6 +1,3 @@
-#
-# --- builder.py (수정 완료 버전) ---
-#
 
 # Adopted from https://github.com/haotian-liu/LLaVA. Below is the original copyright:
 #    Copyright 2023 Haotian Liu
@@ -110,7 +107,7 @@ def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, l
             # mm_projector_weights = torch.load(os.path.join(model_path, 'mm_projector.bin'), map_location='cpu')
             # mm_projector_weights = {k: v.to(torch.float16) for k, v in mm_projector_weights.items()}
             # model.load_state_dict(mm_projector_weights, strict=False)
-            # NOTE: new codes which supports loading mm_projector.bin both offline and online
+            # NOTE: new codes which supports loading mm_projector.bin both offline and online 
             mm_projector_weights = load_mm_projector(model_path, token=token)
             model.load_state_dict(mm_projector_weights, strict=False)
         else:
@@ -128,7 +125,7 @@ def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, l
             print(f"Merging weights")
             model = model.merge_and_unload()
             print('Convert to FP16...')
-            # model.to(torch.float16) # <--- [수정 2] 이 라인도 accelerate와 충돌할 수 있어 주석 처리
+            model.to(torch.float16)
         else:
             use_fast = False
             tokenizer = AutoTokenizer.from_pretrained(model_path, use_fast=False)
@@ -148,7 +145,7 @@ def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, l
         vision_tower = model.get_vision_tower()
         if not vision_tower.is_loaded:
             vision_tower.load_model()
-        # vision_tower.to(device=device, dtype=torch.float16) # <--- [수정 1] 핵심 수정 사항, 확실하게 주석 처리
+        vision_tower.to(device=device, dtype=torch.float16)
         # NOTE: Trace adopts the same processor for processing image and video.
         processor = vision_tower.image_processor
 
