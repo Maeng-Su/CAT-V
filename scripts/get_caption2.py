@@ -118,7 +118,7 @@ def run_captioning(model_path, QA_file_path, video_folder, answers_output_folder
 
         tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True, use_fast=False)
         generation_config = dict(max_new_tokens=1024, do_sample=False)
-        
+
         print(f"  [Caption] 경계 파일 로드 중: {QA_file_path}")
         with open(QA_file_path, 'r', encoding='utf-8') as f:
             events_data = json.load(f)
@@ -130,31 +130,33 @@ def run_captioning(model_path, QA_file_path, video_folder, answers_output_folder
                 json.dump([], f, indent=4, ensure_ascii=False)
             return
 
-        event_list = [f"From {event['segment'].replace('_', ' to ')}s, {event['answer']}" for event in events_data]
-        last_event_data = events_data[-1]
-        
-        video_name = last_event_data['video']
+        # 비디오는 한 번만 로드합니다.
+        video_name = events_data[0]['video']
         video_path = os.path.join(video_folder, video_name)
-
-        print(f"  [Caption] 비디오 로딩 및 추론 실행 중...")
+        print(f"  [Caption] 비디오 로딩 중: {video_path}")
         pixel_values, num_patches_list = load_video(video_path, num_segments=max_frames_num, max_num=1)
         pixel_values = pixel_values.to(torch.bfloat16).to(next(model.parameters()).device)
-
         video_prefix = ''.join([f'Frame{i+1}: <image>\n' for i in range(len(num_patches_list))])
-        video_prefix += ''.join([f'{event}\n' for event in event_list])
-        question_tmp = video_prefix + "Based on the provided events, describe the actions in the video."
-
-        with torch.inference_mode():
-            response = model.chat(tokenizer, pixel_values, question_tmp, generation_config)
         
-        if last_event_data:
-            segment_str = last_event_data['segment'].replace('_', 's - ') + 's'
+        print(f"  [Caption] 각 이벤트에 대해 개별 추론 실행 중...")
+        # for 루프를 돌면서 각 이벤트에 대해 개별적으로 질문합니다.
+        for event in tqdm(events_data):
+            # 각 이벤트에 맞는 구체적인 질문 생성
+            event_desc = f"From {event['segment'].replace('_', ' to ')}s, {event['answer']}"
+            question_tmp = video_prefix + event_desc + "\nDescribe this specific event in detail."
+
+            # 모델을 각 이벤트마다 호출
+            with torch.inference_mode():
+                response = model.chat(tokenizer, pixel_values, question_tmp, generation_config)
+            
+            # 각 이벤트의 결과를 answers 리스트에 추가
+            segment_str = event['segment'].replace('_', 's - ') + 's'
             answers.append({
-                "video": last_event_data['video'],
-                "segment": last_event_data['segment'].split('_'),
+                "video": event['video'],
+                "segment": event['segment'].split('_'),
                 "timestamp": segment_str,
-                "question": last_event_data['question'],
-                "short_answer": last_event_data['answer'],
+                "question": event['question'],
+                "short_answer": event['answer'],
                 "model_answer": response
             })
 

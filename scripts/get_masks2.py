@@ -30,11 +30,68 @@ def determine_model_cfg(model_path):
     if "tiny" in model_path: return "configs/samurai/sam2.1_hiera_t.yaml"
     raise ValueError("Unknown model size in path!")
 
+# def run_mask_generation(model_path, video_path, txt_path, video_output_path, device, save_to_video=True):
+#     """
+#     Mask generation 모델을 로드, 실행하고 메모리에서 해제합니다.
+#     """
+#     predictor = state = None
+#     try:
+#         print(f"  [Mask] 모델 로드 중: {model_path}")
+#         model_cfg = determine_model_cfg(model_path)
+#         predictor = build_sam2_video_predictor(model_cfg, model_path, device=device)
+        
+#         prompts = load_txt(txt_path)
+#         print(f"  [Mask] 프롬프트 로드 완료: {prompts}")
+
+#         cap = cv2.VideoCapture(video_path)
+#         loaded_frames = []
+#         while True:
+#             ret, frame = cap.read()
+#             if not ret: break
+#             loaded_frames.append(frame)
+#         cap.release()
+#         if not loaded_frames: raise ValueError("비디오에서 프레임을 로드할 수 없습니다.")
+#         height, width = loaded_frames[0].shape[:2]
+
+#         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+#         # video_output_path는 디렉터리가 아닌 전체 파일 경로여야 함
+#         out = cv2.VideoWriter(video_output_path, fourcc, 30, (width, height))
+        
+#         print(f"  [Mask] 추론 실행 중...")
+#         with torch.inference_mode(), torch.autocast("cuda", dtype=torch.float16):
+#             state = predictor.init_state(video_path, offload_video_to_cpu=True)
+#             bbox, _ = prompts[0]
+#             predictor.add_new_points_or_box(state, box=bbox, frame_idx=0, obj_id=0)
+            
+#             color = (255, 0, 0) # 단일 객체 색상
+#             for frame_idx, object_ids, masks in tqdm(predictor.propagate_in_video(state)):
+#                 img = loaded_frames[frame_idx]
+#                 for obj_id, mask in zip(object_ids, masks):
+#                     mask_np = mask[0].cpu().numpy() > 0.0
+#                     mask_img = np.zeros_like(img, dtype=np.uint8)
+#                     mask_img[mask_np] = color
+#                     img = cv2.addWeighted(img, 1, mask_img, 0.4, 0) # 투명도 조절
+#                 out.write(img)
+        
+#         out.release()
+#         print(f"  [Mask] 마스크 비디오 저장 완료: {video_output_path}")
+
+#     except Exception as e:
+#         print(f"Mask generation 중 오류 발생: {e}")
+#     finally:
+#         if predictor is not None:
+#             del predictor
+#         if state is not None:
+#             del state
+#         gc.collect()
+#         torch.cuda.empty_cache()
+#         print(f"  [Mask] 모델 메모리 해제 완료.")
 def run_mask_generation(model_path, video_path, txt_path, video_output_path, device, save_to_video=True):
     """
-    Mask generation 모델을 로드, 실행하고 메모리에서 해제합니다.
+    Mask generation 모델을 로드, 실행하고 메모리에서 해제합니다. (스트리밍 방식 적용)
     """
     predictor = state = None
+    cap = out = None  # VideoCapture와 VideoWriter 객체를 finally에서 닫기 위해 미리 선언
     try:
         print(f"  [Mask] 모델 로드 중: {model_path}")
         model_cfg = determine_model_cfg(model_path)
@@ -43,19 +100,17 @@ def run_mask_generation(model_path, video_path, txt_path, video_output_path, dev
         prompts = load_txt(txt_path)
         print(f"  [Mask] 프롬프트 로드 완료: {prompts}")
 
+        # --- [수정 1] 비디오 정보만 미리 읽고, 프레임은 로드하지 않음 ---
         cap = cv2.VideoCapture(video_path)
-        loaded_frames = []
-        while True:
-            ret, frame = cap.read()
-            if not ret: break
-            loaded_frames.append(frame)
-        cap.release()
-        if not loaded_frames: raise ValueError("비디오에서 프레임을 로드할 수 없습니다.")
-        height, width = loaded_frames[0].shape[:2]
+        if not cap.isOpened():
+            raise ValueError(f"비디오 파일을 열 수 없습니다: {video_path}")
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        fps = int(cap.get(cv2.CAP_PROP_FPS))
+        # -----------------------------------------------------------
 
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        # video_output_path는 디렉터리가 아닌 전체 파일 경로여야 함
-        out = cv2.VideoWriter(video_output_path, fourcc, 30, (width, height))
+        out = cv2.VideoWriter(video_output_path, fourcc, fps, (width, height))
         
         print(f"  [Mask] 추론 실행 중...")
         with torch.inference_mode(), torch.autocast("cuda", dtype=torch.float16):
@@ -65,7 +120,15 @@ def run_mask_generation(model_path, video_path, txt_path, video_output_path, dev
             
             color = (255, 0, 0) # 단일 객체 색상
             for frame_idx, object_ids, masks in tqdm(predictor.propagate_in_video(state)):
-                img = loaded_frames[frame_idx]
+                
+                # --- [수정 2] 필요한 프레임만 하나씩 읽어오기 ---
+                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+                ret, img = cap.read()
+                if not ret:
+                    print(f"Warning: {frame_idx} 프레임을 읽는 데 실패했습니다. 루프를 중단합니다.")
+                    break
+                # ---------------------------------------------
+                
                 for obj_id, mask in zip(object_ids, masks):
                     mask_np = mask[0].cpu().numpy() > 0.0
                     mask_img = np.zeros_like(img, dtype=np.uint8)
@@ -73,12 +136,20 @@ def run_mask_generation(model_path, video_path, txt_path, video_output_path, dev
                     img = cv2.addWeighted(img, 1, mask_img, 0.4, 0) # 투명도 조절
                 out.write(img)
         
-        out.release()
         print(f"  [Mask] 마스크 비디오 저장 완료: {video_output_path}")
 
     except Exception as e:
         print(f"Mask generation 중 오류 발생: {e}")
+        import traceback
+        traceback.print_exc()
     finally:
+        # --- [수정 3] 비디오 객체들 닫기 ---
+        if cap is not None:
+            cap.release()
+        if out is not None:
+            out.release()
+        # ------------------------------------
+
         if predictor is not None:
             del predictor
         if state is not None:
@@ -86,7 +157,6 @@ def run_mask_generation(model_path, video_path, txt_path, video_output_path, dev
         gc.collect()
         torch.cuda.empty_cache()
         print(f"  [Mask] 모델 메모리 해제 완료.")
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
