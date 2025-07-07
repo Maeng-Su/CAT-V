@@ -81,7 +81,27 @@ def run_inference_pipeline(video_path, bbox):
     try:
         # --- Step 1: Boundary Detection (수정됨) ---
         print("\n[Step 1/4] 경계 감지 실행 중...")
-        question_text = 'Localize a series of activity events in the video, output the start and end timestamp for each event, and describe each event with sentences.'
+        question_text = '''You are a video analysis AI. Your sole task is to find all worker actions in the provided video and output the results as a valid JSON array.
+        You MUST NOT include any text other than the JSON output (no explanations, no greetings).
+
+        # Action List:
+        - Consult
+        - Picking
+        - Assen (Assemble)
+        - Take m (Take material)
+        - Take sc (Take screw)
+        - Put do (Put down)
+        - Other
+
+        # JSON Object Schema:
+        {
+        "action": "Action Label",
+        "start_time": start_time_in_seconds,
+        "end_time": end_time_in_seconds
+        }
+
+        # Instruction:
+        Analyze the provided video and output all action events as a JSON array.'''
         run_boundary_detection(
             model_path=CONFIG['get_boundary_model_path'],
             video_path=video_path,

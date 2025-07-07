@@ -1,0 +1,25 @@
+# 기본 세팅
+conda create -n cat2 python=3.10 -y
+conda activate cat2
+
+pip install -e .
+
+cd checkpoints && \
+./download_ckpts.sh && \
+cd ..
+
+bash inference.sh
+
+# SWAP으로 메모리 확장
+# 이전 스왑 파일이 있다면 삭제
+sudo rm /swapfile
+
+sudo fallocate -l 32G /swapfile
+
+sudo chmod 600 /swapfile
+
+sudo mkswap /swapfile
+
+sudo swapon /swapfile
+
+free -h

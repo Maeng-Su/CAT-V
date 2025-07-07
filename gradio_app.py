@@ -13,7 +13,7 @@ CONFIG = {
     "get_boundary_model_path": "Yongxin-Guo/trace-uni",
     "get_mask_model_path": "./checkpoints/sam2.1_hiera_base_plus.pt",
     "output_folder": "./results/",
-    "frame_count": 16,
+    "frame_count": 8,
 }
 
 def extract_first_frame(video_path):
